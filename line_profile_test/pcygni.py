@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 from __future__ import print_function
 import numpy as np
+from astropy import units, constants
 import matplotlib.pyplot as plt
-import pcygni_profile as pcyg
-import colors as mycols
-import h5py
-
-
-props = mycols.loadDefaultPlotParams(journal="mnras")
+try:
+    import pcygni_profile as pcyg
+    analytic_prediction_available = True
+except ImportError:
+    analytic_prediction_available = False
+    pass
 
 
 c1 = plt.rcParams["axes.color_cycle"][0]
@@ -16,20 +17,21 @@ c3 = plt.rcParams["axes.color_cycle"][2]
 c4 = plt.rcParams["axes.color_cycle"][3]
 
 
-c = 2.9979e10
 np.random.seed(0)
 
 
 class mc_packet(object):
-    def __init__(self, Rmin, Rmax, nu_min, nu_max, nu_line, tau_sob, t, verbose=False):
+    def __init__(self, Rmin, Rmax, lam_min, lam_max, lam_line, tau_sobolev, t,
+                 verbose=False):
 
-        self.nu_max = nu_max
-        self.nu_min = nu_min
         self.verbose = verbose
-        self.Rmin = Rmin
-        self.Rmax = Rmax
 
-        self.nu_line = nu_line
+        self.nu_max = lam_min.to("Hz", equivalencies=units.spectral())
+        self.nu_min = lam_max.to("Hz", equivalencies=units.spectral())
+        self.Rmin = Rmin.to("cm")
+        self.Rmax = Rmax.to("cm")
+
+        self.nu_line = lam_line.to("Hz", equivalencies=units.spectral())
         self.tau_sob = tau_sob
 
         self.r = self.Rmin
@@ -49,47 +51,51 @@ class mc_packet(object):
 
     def update_position_direction(self, l):
 
-        ri = self.r
+        ri = self.r.to("cm")
 
-        self.r = np.sqrt(self.r**2 + l**2 + 2 * l * self.r * self.mu)
-        self.mu = (l + self.mu * ri) / self.r
+        self.r = np.sqrt(self.r**2 + l**2 + 2 * l * self.r * self.mu).to("cm")
+        self.mu = ((l + self.mu * ri) / self.r).to("")
 
     def check_for_boundary_intersection(self):
 
         if self.mu <= -np.sqrt(1 - (self.Rmin / self.r)**2):
-            ## packet will intersect inner boundary if not interrupted
+            # packet will intersect inner boundary if not interrupted
             sgn = -1.
             rbound = self.Rmin
             self.boundint = "left"
         else:
-            ## packet will intersect outer boundary if not interrupted
+            # packet will intersect outer boundary if not interrupted
             sgn = 1.
             rbound = self.Rmax
             self.boundint = "right"
 
-        self.lbound = -self.mu * self.r + sgn * np.sqrt((self.mu * self.r)**2 - self.r**2 + rbound**2)
-
+        self.lbound = (
+            -self.mu * self.r + sgn * np.sqrt((self.mu * self.r)**2 -
+                                              self.r**2 + rbound**2)).to("cm")
 
     def perform_interaction(self):
 
         mui = self.mu
-        beta = self.r / self.t / c
+        beta = self.r / self.t / constants.c
 
         self.mu = 2. * np.random.rand(1)[0] - 1.
         self.mu = (self.mu + beta) / (1 + beta * self.mu)
 
-        self.nu = self.nu * (1. - beta * mui) / (1. - beta * self.mu)
-
+        self.nu = (self.nu * (1. - beta * mui) /
+                   (1. - beta * self.mu)).to("Hz")
 
     def calc_distance_to_sobolev_point(self):
 
-        self.lsob = c * self.t * (1 - self.nu_line / self.nu) - self.r * self.mu
+        self.lsob = (constants.c * self.t * (1 - self.nu_line / self.nu) -
+                     self.r * self.mu).to("cm")
 
     def propagate(self):
 
         while True:
             if self.verbose:
-                print("r = %e; mu = %e; lbound = %e; lsob = %e" % (self.r, self.mu, self.lbound, self.lsob))
+                print(
+                    "r = {:e}; mu = {:e}; lbound = {:e}; lsob = {:e}".format(
+                        self.r, self.mu, self.lbound, self.lsob))
             if self.lbound < self.lsob or self.lsob < 0:
                 if self.verbose:
                     print("Reaching boundary")
