@@ -248,6 +248,7 @@ class mc_packet(object):
         self.propagated = True
 
 
+# WARNING: does not yet work with current mc_packet class
 class homologous_sphere(object):
     def __init__(self, Rmin, Rmax, nu_min, nu_max, nu_line, tau_sobolev,
                  t, npack, verbose=False):
@@ -281,6 +282,7 @@ class homologous_sphere(object):
         self.emergent_nu = np.array(self.emergent_nu)
 
 
+# WARNING: does not yet work with current mc_packet class
 def example():
 
     lam_line = 1215.6 * units.AA
