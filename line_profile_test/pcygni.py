@@ -248,36 +248,28 @@ class mc_packet(object):
         self.propagated = True
 
 
-# WARNING: does not yet work with current mc_packet class
 class homologous_sphere(object):
-    def __init__(self, Rmin, Rmax, nu_min, nu_max, nu_line, tau_sobolev,
-                 t, npack, verbose=False):
+    def __init__(self, Rmin=Rmin_default, Rmax=Rmax_default,
+                 lam_min=lam_min_default, lam_max=lam_max_default,
+                 lam_line=lam_line_default, tau_sobolev=tau_sobolev_default,
+                 t=t_default, verbose=False, npacks=10000):
 
-        self.Rmin = Rmin
-        self.Rmax = Rmax
-
-        self.nu_min = nu_min
-        self.nu_max = nu_max
-
-        self.nu_line = nu_line
-        self.tau_sobolev = tau_sobolev
-
-        self.t = t
-
-        self.verbose = verbose
-        self.packets = [mc_packet(Rmin=Rmin, Rmax=Rmax, nu_min=nu_min,
-                                  nu_max=nu_max, nu_line=nu_line,
+        self.packets = [mc_packet(Rmin=Rmin, Rmax=Rmax, lam_min=lam_min,
+                                  lam_max=lam_max, lam_line=lam_line,
                                   tau_sobolev=tau_sobolev, t=t,
-                                  verbose=verbose) for i in range(npack)]
+                                  verbose=verbose) for i in range(npacks)]
 
         self.emergent_nu = []
 
     def perform_simulation(self):
 
-        for pack in self.packets:
+        for i, pack in enumerate(self.packets):
+            print(i)
             pack.propagate()
             if pack.fate == "escaped":
                 self.emergent_nu.append(pack.emergent_nu)
+            if i%100 == 0:
+                print("{:d} of {:d} packets done".format(i, npacks))
 
         self.emergent_nu = np.array(self.emergent_nu)
 
@@ -288,7 +280,7 @@ def example():
     lam_line = 1215.6 * units.AA
     lam_min = 1185.0 * units.AA
     lam_max = 1245.0 * units.AA
-    tau_sob = 1
+    tau_sobolev = 1
 
     t = 13.5 * units.d
 
@@ -298,17 +290,18 @@ def example():
     Rmin = vmin * t
     Rmax = vmax * t
 
-    nu_min = constants.c / lam_max
-    nu_max = constants.c / lam_min
-    nu_line = constants.c / lam_line
+    nu_min = lam_max.to("Hz", equivalencies=units.spectral())
+    nu_max = lam_min.to("Hz", equivalencies=units.spectral())
 
-    npack = 100000
+    npacks = 100000
     nbins = 200
+
     npoints = 500
     verbose = False
 
     sphere = homologous_sphere(
-        Rmin, Rmax, nu_min, nu_max, nu_line, tau_sob, t, npack,
+        Rmin=Rmin, Rmax=Rmax, lam_min=lam_min, lam_max=lam_max,
+        lam_line=lam_line, tau_sobolev=tau_sobolev, t=t, npacks=npacks,
         verbose=verbose)
     sphere.perform_simulation()
 
@@ -318,7 +311,7 @@ def example():
     if analytic_prediction_available:
         # WARNING: untested
         solver = pcyg.homologous_sphere(rmin=Rmin, rmax=Rmax, vmax=vmax, Ip=1,
-                                        tauref=tau_sob, vref=1e8, ve=1e40,
+                                        tauref=tau_sobolev, vref=1e8, ve=1e40,
                                         lam0=lam_line)
         solution = solver.save_line_profile(nu_min, nu_max, vs_nu=True,
                                             npoints=npoints)
@@ -328,7 +321,7 @@ def example():
     ax.hist(sphere.emergent_nu * 1e-15,
             bins=np.linspace(nu_min, nu_max, nbins) * 1e-15,
             histtype="step",
-            weights=np.ones(len(sphere.emergent_nu)) * float(nbins) / npack,
+            weights=np.ones(len(sphere.emergent_nu)) * float(nbins) / npacks,
             label="Monte Carlo")
 
     ax.set_xlabel(r"$\nu$ [$10^{15} \, \mathrm{Hz}$]")
