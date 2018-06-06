@@ -249,7 +249,8 @@ class mc_packet(object):
 
 
 class homologous_sphere(object):
-    def __init__(self, Rmin, Rmax, nu_min, nu_max, nu_line, tau_sob, t, npack,  verbose = False):
+    def __init__(self, Rmin, Rmax, nu_min, nu_max, nu_line, tau_sobolev,
+                 t, npack, verbose=False):
 
         self.Rmin = Rmin
         self.Rmax = Rmax
@@ -258,12 +259,15 @@ class homologous_sphere(object):
         self.nu_max = nu_max
 
         self.nu_line = nu_line
-        self.tau_sob = tau_sob
+        self.tau_sobolev = tau_sobolev
 
         self.t = t
 
         self.verbose = verbose
-        self.packets = [mc_packet(Rmin, Rmax, nu_min, nu_max, nu_line, tau_sob, t, verbose = verbose) for i in xrange(npack)]
+        self.packets = [mc_packet(Rmin=Rmin, Rmax=Rmax, nu_min=nu_min,
+                                  nu_max=nu_max, nu_line=nu_line,
+                                  tau_sobolev=tau_sobolev, t=t,
+                                  verbose=verbose) for i in range(npack)]
 
         self.emergent_nu = []
 
@@ -277,40 +281,53 @@ class homologous_sphere(object):
         self.emergent_nu = np.array(self.emergent_nu)
 
 
-def main():
+def example():
 
-    lam_line = 1215.6 * 1e-8
-    lam_min = 1185.0 * 1e-8
-    lam_max = 1245.0 * 1e-8
+    lam_line = 1215.6 * units.AA
+    lam_min = 1185.0 * units.AA
+    lam_max = 1245.0 * units.AA
     tau_sob = 1
 
-    t = 13.5 * 86400.
+    t = 13.5 * units.d
 
-    vmin = 1e-4 * c
-    vmax = 0.01 * c
+    vmin = 1e-4 * constants.c
+    vmax = 0.01 * constants.c
 
     Rmin = vmin * t
     Rmax = vmax * t
 
-    nu_min = c / lam_max
-    nu_max = c / lam_min
-    nu_line = c / lam_line
+    nu_min = constants.c / lam_max
+    nu_max = constants.c / lam_min
+    nu_line = constants.c / lam_line
 
     npack = 100000
     nbins = 200
     npoints = 500
     verbose = False
 
-    sphere = homologous_sphere(Rmin, Rmax, nu_min, nu_max, nu_line, tau_sob, t, npack,  verbose = verbose)
+    sphere = homologous_sphere(
+        Rmin, Rmax, nu_min, nu_max, nu_line, tau_sob, t, npack,
+        verbose=verbose)
     sphere.perform_simulation()
 
-    solver = pcyg.homologous_sphere(rmin = Rmin, rmax = Rmax, vmax = vmax, Ip = 1, tauref = tau_sob, vref = 1e8, ve = 1e40, lam0 = lam_line)
-    solution = solver.save_line_profile(nu_min, nu_max, vs_nu = True, npoints = npoints)
-
-    fig = plt.figure(figsize = (props["pagewidth"], 1.5 * props["columnwidth"]))
+    fig = plt.figure()
     ax = fig.add_subplot(111)
-    ax.plot(solution[0] * 1e-15, solution[1] / solution[1,0], label = r"prediction", color = c2)
-    ax.hist(sphere.emergent_nu * 1e-15, bins = np.linspace(nu_min, nu_max, nbins) * 1e-15, histtype = "step", weights = np.ones(len(sphere.emergent_nu)) * float(nbins) / float(npack), label = "Monte Carlo", color = c3)
+
+    if analytic_prediction_available:
+        # WARNING: untested
+        solver = pcyg.homologous_sphere(rmin=Rmin, rmax=Rmax, vmax=vmax, Ip=1,
+                                        tauref=tau_sob, vref=1e8, ve=1e40,
+                                        lam0=lam_line)
+        solution = solver.save_line_profile(nu_min, nu_max, vs_nu=True,
+                                            npoints=npoints)
+        ax.plot(solution[0] * 1e-15, solution[1] / solution[1, 0],
+                label=r"prediction")
+
+    ax.hist(sphere.emergent_nu * 1e-15,
+            bins=np.linspace(nu_min, nu_max, nbins) * 1e-15,
+            histtype="step",
+            weights=np.ones(len(sphere.emergent_nu)) * float(nbins) / npack,
+            label="Monte Carlo")
 
     ax.set_xlabel(r"$\nu$ [$10^{15} \, \mathrm{Hz}$]")
     ax.set_xlim([nu_min * 1e-15, nu_max * 1e-15])
@@ -321,21 +338,13 @@ def main():
     ax.legend()
     plt.savefig("line_profile.pdf")
 
-    f = h5py.File("pcygni_profile.h5", "w")
-    grp = f.create_group("solution")
-    dset = grp.create_dataset("nu", data=solution[0])
-    dset = grp.create_dataset("I", data=solution[1])
-    grp = f.create_group("mc")
-    grp.attrs["nu_min"] = nu_min
-    grp.attrs["nu_max"] = nu_max
-    grp.attrs["n_pack"] = npack
-    dset = grp.create_dataset("nu", data=sphere.emergent_nu)
-    f.close()
+
+def main():
+
+    example()
+
 
 if __name__ == "__main__":
 
     main()
     plt.show()
-
-
-
