@@ -358,6 +358,7 @@ def perform_line_profile_calculation(Rmin=Rmin_default, Rmax=Rmax_default,
         this requires that the appropriate module is available (default True)
     """
 
+    vmin = (Rmin / t).to("cm/s")
     vmax = (Rmax / t).to("cm/s")
 
     nu_min = lam_max.to("Hz", equivalencies=units.spectral())
@@ -377,13 +378,22 @@ def perform_line_profile_calculation(Rmin=Rmin_default, Rmax=Rmax_default,
     if include_analytic_solution:
         if analytic_prediction_available:
             # WARNING: untested
-            solver = pcyg.homologous_sphere(rmin=Rmin, rmax=Rmax, vmax=vmax,
-                                            Ip=1, tauref=tau_sobolev, vref=1e8,
-                                            ve=1e40, lam0=lam_line)
-            solution = solver.save_line_profile(nu_min, nu_max, vs_nu=True,
-                                                npoints=npoints)
-            ax.plot(solution[0] * 1e-15, solution[1] / solution[1, 0],
-                    label=r"prediction")
+            ve = 1e40 * units.cm / units.s
+            vref = 1e8 * units.cm / units.s
+            solver = pcyg.PcygniCalculator(t=t, vmax=vmax, vphot=vmin,
+                                           tauref=tau_sobolev, vref=vref,
+                                           ve=ve, lam0=lam_line)
+            nu_tmp, Fnu_normed_tmp = solver.calc_profile_Fnu(npoints=npoints)
+            Fnu_normed = np.append(np.insert(Fnu_normed_tmp, 0, 1), 1)
+
+            # numpy append has difficulties with astropy quantities
+            nu = np.zeros(len(nu_tmp) + 2) * nu_tmp.unit
+            nu[1:-1] = nu_tmp[::]
+            nu[0] = nu_min
+            nu[-1] = nu_max
+
+            ax.plot(nu.to("1e15 Hz"), Fnu_normed,
+                    label=r"formal integration")
         else:
             print("Warning: module for analytic solution not available")
 
