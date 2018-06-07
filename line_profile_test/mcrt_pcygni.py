@@ -1,15 +1,39 @@
 #!/usr/bin/env python
 """
+Python module containing tools to perform simple MCRT simulations for the
+line profile test in a homologously expanding spherical flow. This test is
+presented in the MCRT review.
+
+There is the possibility to compare the MCRT results to analytic predictions
+obtained from a formal integration of the radiative transfer problem, following
+the procedure outlined by Jeffery & Branch 1990. For this, a external module
+has to be imported which can be obtained from the github repository
+
+https://github.com/unoebauer/public-astro-tools.git
+
+
+References
+----------
+Jeffery, D. J. & Branch,  Analysis of Supernova Spectra in
+    Analysis of Supernova Spectra Supernovae,
+    Jerusalem Winter School for Theoretical Physics, 1990, 149
+
 Abbreviations used:
     CMF: co-moving frame
     LF: lab frame
     MC: Monte Carlo
 """
 from __future__ import print_function
+import os
 import numpy as np
 from astropy import units, constants
+import matplotlib
+if "DISPLAY" not in os.environ:
+    # backend that works without an X-server
+    matplotlib.use("agg")
 import matplotlib.pyplot as plt
 try:
+    # Available from https://github.com/unoebauer/public-astro-tools.git
     import pcygni_profile as pcyg
     analytic_prediction_available = True
 except ImportError:
@@ -17,7 +41,8 @@ except ImportError:
     pass
 
 
-np.random.seed(0)
+# Set RNG seed for reproducibility
+np.random.seed(42)
 
 # Parameters used for test calculation shown in the review
 tau_sobolev_default = 1
