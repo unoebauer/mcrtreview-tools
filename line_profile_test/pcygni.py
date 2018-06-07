@@ -19,6 +19,7 @@ except ImportError:
 
 np.random.seed(0)
 
+# Parameters used for test calculation shown in the review
 tau_sobolev_default = 1
 t_default = 13.5 * units.d
 lam_min_default = 1185 * units.AA
@@ -44,42 +45,43 @@ class mc_packet(object):
 
     Parameters
     ----------
-    Rmin : units.quantity.Quantity object
+    Rmin : float
         inner radius of the spherical homologous flow;
-        must have a length dimension (default vmin_default * t_default)
-    Rmax : units.quantity.Quantity object
+        must be in cm (default 3.5e12)
+    Rmax : float
         outer radius of the spherical homologous flow;
-        must have a length dimension (default vmax_default * t_default)
-    lam_min : units.quantity.Quantity object
-        minimum wavelength of the spectral range considered, must have
-        a length dimension (default lam_min_default)
-    lam_max : units.quantity.Quantity object
-        maximum wavelength of the spectral range considered, must have
-        a length dimension (default lam_max_default)
+        must be in cm (default 3.5e14)
+    nu_min : units.quantity.Quantity object
+        minimum fequency of the spectral range considered, must be in Hz
+        (default 2.4e15)
+    nu_max : units.quantity.Quantity object
+        maximum frequency of the spectral range considered, must be in Hz
+        (default 2.5e15)
     lam_line : units.quantity.Quantity object
-        rest wavelength of the line transition, must have a length
-        dimension (default lam_line_default)
+        rest frequency of the line transition, must be in Hz
+        (default 2.47e15)
     tau_sobolev : float
         Sobolev optical depth of the line transition; assumed to constant
-        throughout the domain (default tau_sobolev_default)
+        throughout the domain, must be dimensionless
+        (default 1)
     t : units.quantity.Quantity object
-        time since explosion, must have dimension of time (default t_default)
+        time since explosion, must be in s (default 1.1e6)
     verbose : boolean
         flag controlling the output to stdout (default False)
     """
-    def __init__(self, Rmin=Rmin_default, Rmax=Rmax_default,
-                 lam_min=lam_min_default, lam_max=lam_max_default,
-                 lam_line=lam_line_default, tau_sobolev=tau_sobolev_default,
-                 t=t_default, verbose=False):
+    def __init__(self, Rmin=3.5e12, Rmax=3.5e14,
+                 nu_min=2.4e15, nu_max=2.5e15,
+                 nu_line=2.47e15, tau_sobolev=1,
+                 t=1.1e6, verbose=False):
 
         self.verbose = verbose
 
-        self.nu_max = lam_min.to("Hz", equivalencies=units.spectral())
-        self.nu_min = lam_max.to("Hz", equivalencies=units.spectral())
-        self.Rmin = Rmin.to("cm")
-        self.Rmax = Rmax.to("cm")
+        self.nu_min = nu_min
+        self.nu_max = nu_max
+        self.Rmin = Rmin
+        self.Rmax = Rmax
 
-        self.nu_line = lam_line.to("Hz", equivalencies=units.spectral())
+        self.nu_line = nu_line
         self.tau_sob = tau_sobolev
 
         # consistency check
@@ -132,10 +134,10 @@ class mc_packet(object):
             dimension of length
         """
 
-        ri = self.r.to("cm")
+        ri = self.r
 
-        self.r = np.sqrt(self.r**2 + l**2 + 2 * l * self.r * self.mu).to("cm")
-        self.mu = ((l + self.mu * ri) / self.r).to("")
+        self.r = np.sqrt(self.r**2 + l**2 + 2 * l * self.r * self.mu)
+        self.mu = ((l + self.mu * ri) / self.r)
 
     def check_for_boundary_intersection(self):
         """Check which boundary of the spherical domain is intersected first
@@ -159,7 +161,7 @@ class mc_packet(object):
 
         self.lbound = (
             -self.mu * self.r + sgn * np.sqrt((self.mu * self.r)**2 -
-                                              self.r**2 + rbound**2)).to("cm")
+                                              self.r**2 + rbound**2))
 
     def perform_interaction(self):
         """Performs line interaction
@@ -169,28 +171,32 @@ class mc_packet(object):
         propagation LF direction is drawn assuming isotropy in the CMF.
         """
 
-        mui = self.mu
-        beta = self.r / self.t / constants.c
+        beta = self.r / self.t / constants.c.cgs.value
 
         self.mu = 2. * np.random.rand(1)[0] - 1.
         self.mu = (self.mu + beta) / (1 + beta * self.mu)
 
-        self.nu = (self.nu * (1. - beta * mui) /
-                   (1. - beta * self.mu)).to("Hz")
+        self.nu = self.nu_line / (1. - beta * self.mu)
 
     def calc_distance_to_sobolev_point(self):
         """Calculated physical distance to Sobolev point"""
 
-        self.lsob = (constants.c * self.t * (1 - self.nu_line / self.nu) -
-                     self.r * self.mu).to("cm")
+        self.lsob = (constants.c.cgs.value * self.t *
+                     (1 - self.nu_line / self.nu) -
+                     self.r * self.mu)
+
+    def print_info(self, message):
+        if self.verbose:
+            print(message)
 
     def propagate(self):
         """Perform packet propagation
 
         The packet is propagated through the spherical domain until it either
         escapes through the outer boundary and contributes to the spectrum or
-        until it intersects the inner boundary and is discarded.
-
+        until it intersects the inner boundary and is discarded.  The
+        implementation of the propagation routine is specific to the problem at
+        hand and makes use of the fact that a packet can at most interact once.
         """
 
         if self.propagated:
@@ -198,106 +204,166 @@ class mc_packet(object):
                 "Packet has already been propagated!"
             )
 
-        # counter
-        n = 0
-
-        while True:
-            if n > 1:
-                raise PropagationError(
-                    "Propagation takes more steps than expected!")
-            if self.verbose:
-                print(
-                    "step = {:d} r = {:e}; mu = {:e}; ".format(
-                        n, self.r, self.mu, ) +
-                    "lbound = {:e}; lsob = {:e}".format(
-                        self.lbound, self.lsob))
-            if self.lbound < self.lsob or self.lsob < 0:
-                if self.verbose:
-                    print("Reaching boundary")
+        if self.lbound < self.lsob or self.lsob < 0:
+            self.print_info("Reaching outer boundary")
+            self.fate = "escaped"
+        else:
+            self.print_info("Reaching Sobolev point")
+            self.update_position_direction(self.lsob)
+            if self.tau_sob >= self.tau_int:
+                self.print_info("Line Interaction")
+                self.perform_interaction()
+                self.check_for_boundary_intersection()
                 if self.boundint == "inner":
-                    if self.verbose:
-                        print("Intersecting inner boundary")
-                    self.emergent_nu = None
+                    self.print_info("Intersecting inner boundary")
                     self.fate = "absorbed"
-                    break
                 else:
-                    if self.verbose:
-                        print("Escaping through outer boundary")
-                    self.emergent_nu = self.nu
+                    self.print_info("Reaching outer boundary")
                     self.fate = "escaped"
-                    break
             else:
-                if self.verbose:
-                    print("Reaching Sobolev point")
-                self.update_position_direction(self.lsob)
-                if self.tau_sob >= self.tau_int:
-                    if self.verbose:
-                        print("Line Interaction")
-                    self.perform_interaction()
-                else:
-                    if self.verbose:
-                        print("No Line Interaction")
-                    self.nu_line = self.nu_max * 1.1
+                self.fate = "escaped"
 
-            self.draw_new_tau()
-            self.check_for_boundary_intersection()
-            self.calc_distance_to_sobolev_point()
-
-            n += 1
-
+        self.emergent_nu = self.nu
         self.propagated = True
 
 
 class homologous_sphere(object):
+    """
+    Class describing the sphere in homologous expansion in which the MCRT
+    simulation is performed
+
+    The specified number of MC packets are initialized. Their propagation is
+    followed in the main routine of this class. As a result, the emergent
+    frequencies of all escaping packets are recorded in self.emergent_nu.
+
+    Parameters
+    ----------
+    Rmin : units.quantity.Quantity object
+        inner radius of the spherical homologous flow;
+        must have a length dimension (default vmin_default * t_default)
+    Rmax : units.quantity.Quantity object
+        outer radius of the spherical homologous flow;
+        must have a length dimension (default vmax_default * t_default)
+    lam_min : units.quantity.Quantity object
+        minimum wavelength of the spectral range considered, must have
+        a length dimension (default lam_min_default)
+    lam_max : units.quantity.Quantity object
+        maximum wavelength of the spectral range considered, must have
+        a length dimension (default lam_max_default)
+    lam_line : units.quantity.Quantity object
+        rest wavelength of the line transition, must have a length
+        dimension (default lam_line_default)
+    tau_sobolev : float
+        Sobolev optical depth of the line transition; assumed to constant
+        throughout the domain (default tau_sobolev_default)
+    t : units.quantity.Quantity object
+        time since explosion, must have dimension of time (default t_default)
+    verbose : boolean
+        flag controlling the output to stdout (default False)
+    npacks : int
+        number of packets in the MCRT simulation (default 10000)
+    """
     def __init__(self, Rmin=Rmin_default, Rmax=Rmax_default,
                  lam_min=lam_min_default, lam_max=lam_max_default,
                  lam_line=lam_line_default, tau_sobolev=tau_sobolev_default,
                  t=t_default, verbose=False, npacks=10000):
 
-        self.packets = [mc_packet(Rmin=Rmin, Rmax=Rmax, lam_min=lam_min,
-                                  lam_max=lam_max, lam_line=lam_line,
+        t = t.to("s").value
+        Rmin = Rmin.to("cm").value
+        Rmax = Rmax.to("cm").value
+
+        nu_min = lam_max.to("Hz", equivalencies=units.spectral()).value
+        nu_max = lam_min.to("Hz", equivalencies=units.spectral()).value
+        nu_line = lam_line.to("Hz", equivalencies=units.spectral()).value
+
+        self.npacks = npacks
+        self.packets = [mc_packet(Rmin=Rmin, Rmax=Rmax, nu_min=nu_min,
+                                  nu_max=nu_max, nu_line=nu_line,
                                   tau_sobolev=tau_sobolev, t=t,
                                   verbose=verbose) for i in range(npacks)]
 
         self.emergent_nu = []
 
     def perform_simulation(self):
+        """Perform MCRT simulation in the homologous flow
+
+        All packets are propagated until they either escape from the sphere or
+        intersect the photosphere and are discarded.
+        """
 
         for i, pack in enumerate(self.packets):
-            print(i)
             pack.propagate()
             if pack.fate == "escaped":
                 self.emergent_nu.append(pack.emergent_nu)
-            if i%100 == 0:
-                print("{:d} of {:d} packets done".format(i, npacks))
+            if (i % 100) == 0:
+                print("{:d} of {:d} packets done".format(i, self.npacks))
 
-        self.emergent_nu = np.array(self.emergent_nu)
+        self.emergent_nu = np.array(self.emergent_nu) * units.Hz
 
 
-# WARNING: does not yet work with current mc_packet class
-def example():
+def perform_line_profile_calculation(Rmin=Rmin_default, Rmax=Rmax_default,
+                                     lam_min=lam_min_default,
+                                     lam_max=lam_max_default,
+                                     lam_line=lam_line_default,
+                                     tau_sobolev=tau_sobolev_default,
+                                     t=t_default, verbose=False, npacks=10000,
+                                     nbins=100, npoints=500, save_to_pdf=True,
+                                     include_analytic_solution=True):
+    """
+    Class describing the sphere in homologous expansion in which the MCRT
+    simulation is performed
 
-    lam_line = 1215.6 * units.AA
-    lam_min = 1185.0 * units.AA
-    lam_max = 1245.0 * units.AA
-    tau_sobolev = 1
+    The specified number of MC packets are initialized. Their propagation is
+    followed in the main routine of this class. As a result, the emergent
+    frequencies of all escaping packets are recorded in self.emergent_nu.
 
-    t = 13.5 * units.d
+    Parameters
+    ----------
+    Rmin : units.quantity.Quantity object
+        inner radius of the spherical homologous flow;
+        must have a length dimension (default vmin_default * t_default)
+    Rmax : units.quantity.Quantity object
+        outer radius of the spherical homologous flow;
+        must have a length dimension (default vmax_default * t_default)
+    lam_min : units.quantity.Quantity object
+        minimum wavelength of the spectral range considered, must have
+        a length dimension (default lam_min_default)
+    lam_max : units.quantity.Quantity object
+        maximum wavelength of the spectral range considered, must have
+        a length dimension (default lam_max_default)
+    lam_line : units.quantity.Quantity object
+        rest wavelength of the line transition, must have a length
+        dimension (default lam_line_default)
+    tau_sobolev : float
+        Sobolev optical depth of the line transition; assumed to constant
+        throughout the domain (default tau_sobolev_default)
+    t : units.quantity.Quantity object
+        time since explosion, must have dimension of time (default t_default)
+    verbose : boolean
+        flag controlling the output to stdout (default False)
+    npacks : int
+        number of packets in the MCRT simulation (default 10000)
+    nbins : int
+        number of bins used for the histogram when plotting the emergent
+        spectrum (default 100)
+    npoints : int
+        number of points used in the formal integration when calculating the
+        analytic solution, provided that the module is available and that
+        include_analytic_solution is set to True (default 500)
+    save_to_pdf : bool
+        flag controlling whether the comparison plot is saved to pdf (default
+        True)
+    include_analytic_solution : bool
+        flag controlling whether the analytic solution is included in the plot;
+        this requires that the appropriate module is available (default True)
+    """
 
-    vmin = 1e-4 * constants.c
-    vmax = 0.01 * constants.c
-
-    Rmin = vmin * t
-    Rmax = vmax * t
+    vmax = (Rmax / t).to("cm/s")
 
     nu_min = lam_max.to("Hz", equivalencies=units.spectral())
     nu_max = lam_min.to("Hz", equivalencies=units.spectral())
 
-    npacks = 100000
-    nbins = 200
-
     npoints = 500
-    verbose = False
 
     sphere = homologous_sphere(
         Rmin=Rmin, Rmax=Rmax, lam_min=lam_min, lam_max=lam_max,
@@ -308,33 +374,48 @@ def example():
     fig = plt.figure()
     ax = fig.add_subplot(111)
 
-    if analytic_prediction_available:
-        # WARNING: untested
-        solver = pcyg.homologous_sphere(rmin=Rmin, rmax=Rmax, vmax=vmax, Ip=1,
-                                        tauref=tau_sobolev, vref=1e8, ve=1e40,
-                                        lam0=lam_line)
-        solution = solver.save_line_profile(nu_min, nu_max, vs_nu=True,
-                                            npoints=npoints)
-        ax.plot(solution[0] * 1e-15, solution[1] / solution[1, 0],
-                label=r"prediction")
+    if include_analytic_solution:
+        if analytic_prediction_available:
+            # WARNING: untested
+            solver = pcyg.homologous_sphere(rmin=Rmin, rmax=Rmax, vmax=vmax,
+                                            Ip=1, tauref=tau_sobolev, vref=1e8,
+                                            ve=1e40, lam0=lam_line)
+            solution = solver.save_line_profile(nu_min, nu_max, vs_nu=True,
+                                                npoints=npoints)
+            ax.plot(solution[0] * 1e-15, solution[1] / solution[1, 0],
+                    label=r"prediction")
+        else:
+            print("Warning: module for analytic solution not available")
 
-    ax.hist(sphere.emergent_nu * 1e-15,
-            bins=np.linspace(nu_min, nu_max, nbins) * 1e-15,
+    ax.hist(sphere.emergent_nu.to("1e15 Hz"),
+            bins=np.linspace(nu_min, nu_max, nbins).to("1e15 Hz"),
             histtype="step",
             weights=np.ones(len(sphere.emergent_nu)) * float(nbins) / npacks,
             label="Monte Carlo")
 
     ax.set_xlabel(r"$\nu$ [$10^{15} \, \mathrm{Hz}$]")
-    ax.set_xlim([nu_min * 1e-15, nu_max * 1e-15])
+    ax.set_xlim([nu_min.to("1e15 Hz").value, nu_max.to("1e15 Hz").value])
     pax = ax.twiny()
-    pax.set_xlabel(r"$\lambda$ [\AA]")
-    pax.set_xlim([1.e8 * lam_min, 1e8 * lam_max])
+    pax.set_xlabel(r"$\lambda$ $[\mathrm{\AA}]$")
+    pax.set_xlim([lam_min.to("AA").value, lam_max.to("AA").value])
     ax.set_ylabel(r"$F_{\nu}/F_{\nu}^{\mathrm{cont}}$")
     ax.legend()
-    plt.savefig("line_profile.pdf")
+    if save_to_pdf:
+        fig.savefig("line_profile.pdf")
+
+
+def example():
+    """Perform the MCRT test simulation from the review"""
+
+    perform_line_profile_calculation(
+        Rmin=Rmin_default, Rmax=Rmax_default, lam_min=lam_min_default,
+        lam_max=lam_max_default, lam_line=lam_line_default,
+        tau_sobolev=tau_sobolev_default, t=t_default, verbose=False,
+        npacks=100000, nbins=100, npoints=500, save_to_pdf=True)
 
 
 def main():
+    """Main routine; performs the example calculation"""
 
     example()
 
