@@ -1,15 +1,64 @@
 #!/usr/bin/env python
+# MIT License
+#
+# Copyright (c) 2018 Ulrich Noebauer
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+"""
+Python module containing tools to perform simple MCRT simulations to determine
+the escape probability from a homogeneous sphere. This test is presented in the
+MCRT review.
+"""
 from __future__ import print_function
 import numpy as np
 import numpy.random as random
 
 
 def p_esc_analytic(t):
+    """Calculate the escape probability analytically
+
+    Note: it is assumed that there is no scattering within the sphere, but
+    that photons/packets can only be absorbed.
+
+    Parameter
+    ---------
+    t : float, np.ndarray
+        total optical depth of the sphere
+
+    Returns
+    -------
+    p : float, np.ndarray
+        escape probability
+    """
     return (3. / (4. * t) * (1. - 1. / (2. * t**2) +
                              (1. / t + 1. / (2. * t**2)) * np.exp(-2. * t)))
 
 
 class homogeneous_sphere_esc_abs(object):
+    """Homogeneous Sphere class
+
+    Attributes
+    ----------
+    p_esc : float
+        escape probability as determined by MCRT
+
+    """
     def __init__(self, tau, albedo=0.1, N=10000):
 
         self.RNG = random.RandomState(seed=None)
@@ -22,7 +71,8 @@ class homogeneous_sphere_esc_abs(object):
 
         self.N_esc = 0
         self.N_active = self.N
-
+        # TODO: add check to avoid multiple propagation calls
+        # TODO: hide routines from user
         self.propagate()
 
     @property
