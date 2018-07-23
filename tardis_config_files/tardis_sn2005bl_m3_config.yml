@@ -7,13 +7,13 @@ atom_data: kurucz_cd23_chianti_H_He.h5
 model:
     structure:
         type: file
-        filename: Densities_m3_vgrid.dat
+        filename: tardis_sn2005bl_m3_density.dat
         filetype: simple_ascii
         v_inner_boundary: 7.5e3 km/s
         v_outer_boundary : 30000 km/s
     abundances:
         type: file
-        filename: Abundances_m3_vgrid.dat
+        filename: tardis_sn2005bl_m3_abundances.dat
         filetype: simple_ascii
 plasma:
     disable_electron_scattering: no
@@ -25,14 +25,10 @@ montecarlo:
     seed: 23111963
     no_of_packets : 4.0e+4
     iterations: 20
-    black_body_sampling:
-        start: 1 angstrom
-        stop: 1000000 angstrom
-        num: 1.e+6
     last_no_of_packets: 1.e+5
     no_of_virtual_packets: 10
     convergence_strategy:
-        type: specific
+        type: damped
         damping_constant: 1.0
         threshold: 0.05
         fraction: 0.8
