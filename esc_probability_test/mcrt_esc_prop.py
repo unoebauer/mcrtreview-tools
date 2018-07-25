@@ -53,6 +53,26 @@ def p_esc_analytic(t):
 class homogeneous_sphere_esc_abs(object):
     """Homogeneous Sphere class
 
+    This class defines a homogeneous sphere with a specified total optical
+    depth and performs a simple MCRT simulation to determine the escape
+    probability. This is done automatically during the initialization step. The
+    escape probability can be accessed via the class attribute p_esc. The
+    effect of isotropic scattering can be included by setting albedo > 0. This
+    parameter describes the scattering probability with respect to the total
+    (i.e. scattering + absorption) interaction probability.
+
+    Note: the analytic prediction p_esc_analytic only applies for albedo = 0,
+    i.e. in the absence of scattering
+
+    Parameters
+    ----------
+    tau : float
+        total optical depth of the homogeneous sphere
+    albedo : float
+        ratio of scattering to total interaction probability (default 0.1)
+    N : int
+        number of MC packets that are setup up (default 10000)
+
     Attributes
     ----------
     p_esc : float
@@ -66,48 +86,87 @@ class homogeneous_sphere_esc_abs(object):
         self.tau_sphere = tau
         self.albedo = albedo
 
+        # initial position of packets in optical depth space
         self.tau_i = self.tau_sphere * (self.RNG.rand(self.N))**(1./3.)
+        # initial propagation direction
         self.mu_i = 2 * self.RNG.rand(self.N) - 1.
 
+        # number of escaping packets
         self.N_esc = 0
+        # number of active packets
         self.N_active = self.N
-        # TODO: add check to avoid multiple propagation calls
-        # TODO: hide routines from user
-        self.propagate()
+
+        # perform propagation
+        self._propagated = False
+        self._propagate()
 
     @property
     def p_esc(self):
+        """escape probability"""
         return self.N_esc / float(self.N)
 
-    def propagate(self):
+    def _propagate(self):
+        """Perform propagation of MC packets
+
+        All packets are followed until they are absorbed or escape from the
+        sphere.
+        """
+
+        if self._propagated:
+
+            print("Propagation has already been performed!")
+            print("_propagate call will have no effect")
+            return False
 
         i = 0
         while self.N_active > 0:
-            self.propagate_step()
+            self._propagate_step()
             i = i + 1
             if i > 1e6:
                 print("Safety exit")
-                break
-        print("{:d} Iterations".format(i))
+                print("Propagation steps limit of {:d} exceeded".format(i))
+                return False
+        print("Performed {:d} propagation steps".format(i))
+        return True
 
-    def propagate_step(self):
+    def _propagate_step(self):
+        """Perform one propagation step
 
+        All active packets are propagated to the next event which can either be
+        a physical interaction or escaping from the sphere. If scatterings are
+        active, it is decided for each interacting packet whether it is
+        absorbed or scattered. All packets that are absorbed or escape during
+        the current step are removed from the active pool.
+        """
+
+        # optical depth to next interaction
         self.tau = -np.log(self.RNG.rand(self.N_active))
+        # optical depth to sphere edge
         self.tau_edge = np.sqrt(self.tau_sphere**2 - self.tau_i**2 *
                                 (1. - self.mu_i**2)) - self.tau_i * self.mu_i
 
+        # identify packets that escape
         self.esc_mask = self.tau_edge < self.tau
+        # update number of escaping packets
         self.N_esc += self.esc_mask.sum()
+
+        # identify interacting packets
         self.nesc_mask = np.logical_not(self.esc_mask)
 
+        # decide which interacting packets scatter and which get absorbed
         self.abs_mask = self.RNG.rand(self.nesc_mask.sum()) >= self.albedo
         self.scat_mask = np.logical_not(self.abs_mask)
 
+        # select properties of scattering packets
         self.tau = self.tau[self.nesc_mask][self.scat_mask]
         self.tau_i = self.tau_i[self.nesc_mask][self.scat_mask]
         self.mu_i = self.mu_i[self.nesc_mask][self.scat_mask]
 
+        # update number of active packets
         self.N_active = self.scat_mask.sum()
+
+        # update properties (position in optical depth space, propagation
+        # direction) of scattering packets
         self.tau_i = np.sqrt(self.tau_i**2 + self.tau**2 +
                              2. * self.tau * self.tau_i * self.mu_i)
         self.mu_i = 2 * self.RNG.rand(self.N_active) - 1.
