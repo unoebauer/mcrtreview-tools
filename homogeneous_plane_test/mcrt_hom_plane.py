@@ -1,3 +1,4 @@
+from __future__ import print_function
 import numpy as np
 import astropy.units as u
 import astropy.constants as c
@@ -24,7 +25,7 @@ class mc_packet(object):
         self.l_edge = self.calculate_distance_edge()
         self.l_int = self.calculate_distance_interaction()
 
-        self.is_active = True
+        self.is_absorbed = False
         self.is_escaped = False
 
         self.prop_cycle_limit = 1000000
@@ -58,13 +59,14 @@ class mc_packet(object):
     def interact(self):
 
         self.update_estimators(self.l_int)
+        self.is_absorbed = True
 
-        self.x = self.update_position(self.l_int)
-        self.mu = 2. * np.random.rand(1)[0] - 1.
+        # self.x = self.update_position(self.l_int)
+        # self.mu = 2. * np.random.rand(1)[0] - 1.
 
-        self.tau = -np.log(np.random.rand(1)[0])
-        self.l_edge = self.calculate_distance_edge()
-        self.l_int = self.calculate_distance_interaction()
+        # self.tau = -np.log(np.random.rand(1)[0])
+        # self.l_edge = self.calculate_distance_edge()
+        # self.l_int = self.calculate_distance_interaction()
 
     def change_cell(self):
 
@@ -73,7 +75,6 @@ class mc_packet(object):
         if self.next_cell_index == self.grid.Ncells:
 
             self.is_escaped = True
-            self.is_active = False
 
             return False
 
@@ -113,7 +114,7 @@ class mc_packet(object):
             if i > self.prop_cycle_limit:
                 print ("Cycle Limit reached")
                 return False
-            if self.is_escaped:
+            if self.is_escaped or self.is_absorbed:
                 return True
 
             if self.l_int < self.l_edge:
@@ -150,23 +151,51 @@ class mcrt_grid(object):
         self.npackets_cell = (self.eta * self.dx / self.L).astype(np.int)
         # self.npackets_cell = (self.eta * self.dx * self.dt / self.L).astype(np.int)
         self.npackets_cell_cum = np.cumsum(self.npackets_cell)
+        self.npackets_cell_cum_frac = np.cumsum(self.npackets_cell).astype(np.float) / np.sum(self.npackets_cell)
         self.packets = []
 
-        j = 0
-        for i in range(self.Npackets):
-            if not i < self.npackets_cell_cum[j]:
-                j = j+1
+        # j = 0
+        # for i in range(self.Npackets):
+        #     if not i < self.npackets_cell_cum[j]:
+        #         j = j+1
 
-            self.packets.append(mc_packet(j, self, self.L))
+        #     self.packets.append(mc_packet(j, self, self.L))
 
         self.Jestimator = np.zeros(self.Ncells)
+        print(self.npackets_cell_cum_frac)
 
     def propagate(self):
 
-        for i, packet in enumerate(self.packets):
+        N = self.Npackets
+        n = 0
 
-            print(i)
+        while 1:
+            if N == 0:
+                print("Success")
+                break
+            if n > 10000000:
+                print("Failure")
+                break
+            z = np.random.rand(1)[0]
+            i = np.argwhere((self.npackets_cell_cum_frac - z) > 0)[0, 0]
+            packet = mc_packet(i, self, self.L)
+            print("Initializing packet in cell {:d}".format(i))
             packet.propagate()
+            if packet.is_escaped:
+                print("packet escaped")
+                N = N - 1
+            elif packet.is_absorbed:
+                print("packet packet was absorbed")
+            else:
+                raise ValueError("Something went wrong")
+            n = n + 1
+            print("{:d} packets processed".format(n))
+            print("{:d} packets escaped".format(self.Npackets - N))
+
+        # for i, packet in enumerate(self.packets):
+
+        #     print(i)
+        #     packet.propagate()
 
 
 
