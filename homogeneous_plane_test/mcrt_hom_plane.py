@@ -4,6 +4,9 @@ import astropy.units as u
 import astropy.constants as c
 
 
+np.random.seed(0)
+
+
 class mc_packet(object):
 
     def __init__(self, i, grid, L):
@@ -81,6 +84,7 @@ class mc_packet(object):
         if self.next_cell_index == self.grid.Ncells:
 
             self.is_escaped = True
+            self.x = self.cell_xr
 
             return False
 
@@ -118,7 +122,7 @@ class mc_packet(object):
         i = 0
         while 1:
             if i > self.prop_cycle_limit:
-                print ("Cycle Limit reached")
+                print("Cycle Limit reached")
                 return False
             if self.is_escaped or self.is_absorbed:
                 return True
@@ -128,7 +132,6 @@ class mc_packet(object):
                 self.interact()
 
             else:
-
                 self.change_cell()
 
             i = i+1
@@ -136,7 +139,7 @@ class mc_packet(object):
 
 class mcrt_grid(object):
     def __init__(self, chi=2.5e-4, S=10., xint=1e6, xmax=5e6, Ncells=100,
-                 Npackets=100):
+                 Npackets=1000000):
 
         self.Ncells = Ncells
         self.Npackets = Npackets
@@ -150,14 +153,16 @@ class mcrt_grid(object):
         self.chi = np.where(self.xr <= xint, chi, 1e-20)
         self.eta = np.where(self.xr <= xint, S * chi, 1e-20)
 
-        self.Ltot = np.sum(self.eta * self.dx)
+        self.Ltot = 4. * np.pi * np.sum(self.eta * self.dx)
         # self.Ltot = np.sum(self.eta * self.dx * self.dt)
         self.L = self.Ltot / float(self.Npackets)
 
-        self.npackets_cell = (self.eta * self.dx / self.L).astype(np.int)
+        self.npackets_cell = (4. * np.pi * self.eta * self.dx /
+                              self.L).astype(np.int)
         # self.npackets_cell = (self.eta * self.dx * self.dt / self.L).astype(np.int)
         self.npackets_cell_cum = np.cumsum(self.npackets_cell)
-        self.npackets_cell_cum_frac = np.cumsum(self.npackets_cell).astype(np.float) / np.sum(self.npackets_cell)
+        self.npackets_cell_cum_frac = \
+            np.cumsum(self.npackets_cell).astype(np.float) / np.sum(self.npackets_cell)
         self.packets = []
 
         # j = 0
@@ -175,35 +180,49 @@ class mcrt_grid(object):
     def propagate(self):
 
         N = self.Npackets
-        n = 0
 
-        while 1:
-            if N == 0:
-                print("Success")
-                break
-            if n > 10000000:
-                print("Failure")
-                break
+        self.esc_packets_x = []
+        self.esc_packets_mu = []
+        self.esc_packets_L = []
+
+        for i in range(N):
+
             z = np.random.rand(1)[0]
             i = np.argwhere((self.npackets_cell_cum_frac - z) > 0)[0, 0]
             packet = mc_packet(i, self, self.L)
-            print("Initializing packet in cell {:d}".format(i))
             packet.propagate()
             if packet.is_escaped:
-                print("packet escaped")
-                N = N - 1
-            elif packet.is_absorbed:
-                print("packet packet was absorbed")
-            else:
-                raise ValueError("Something went wrong")
-            n = n + 1
-            print("{:d} packets processed".format(n))
-            print("{:d} packets escaped".format(self.Npackets - N))
+                self.esc_packets_x.append(packet.x)
+                self.esc_packets_mu.append(packet.mu)
+                self.esc_packets_L.append(packet.L)
+
+        # while 1:
+        #     if N == 0:
+        #         print("Success")
+        #         break
+        #     if n > 10000000:
+        #         print("Failure")
+        #         break
+        #     z = np.random.rand(1)[0]
+        #     i = np.argwhere((self.npackets_cell_cum_frac - z) > 0)[0, 0]
+        #     packet = mc_packet(i, self, self.L)
+        #     print("Initializing packet in cell {:d}".format(i))
+        #     packet.propagate()
+        #     if packet.is_escaped:
+        #         print("packet escaped")
+        #         N = N - 1
+        #     elif packet.is_absorbed:
+        #         print("packet packet was absorbed")
+        #     else:
+        #         raise ValueError("Something went wrong")
+        #     n = n + 1
+        #     print("{:d} packets processed".format(n))
+        #     print("{:d} packets escaped".format(self.Npackets - N))
 
 
-        self.Jestimator = self.Jestimator * self.Npackets / float(n)
-        self.Hestimator = self.Hestimator * self.Npackets / float(n)
-        self.Kestimator = self.Kestimator * self.Npackets / float(n)
+        # self.Jestimator = self.Jestimator * self.Npackets / float(n)
+        # self.Hestimator = self.Hestimator * self.Npackets / float(n)
+        # self.Kestimator = self.Kestimator * self.Npackets / float(n)
 
         # for i, packet in enumerate(self.packets):
 
