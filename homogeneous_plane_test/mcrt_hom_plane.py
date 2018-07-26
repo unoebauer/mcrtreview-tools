@@ -22,12 +22,12 @@ class mc_packet(object):
         self.tau = -np.log(np.random.rand(1)[0])
 
         self.l_edge = self.calculate_distance_edge()
-        self.l_int = self.calculate_distance_edge()
+        self.l_int = self.calculate_distance_interaction()
 
         self.is_active = True
         self.is_escaped = False
 
-        self.prop_cycle_limit = 1000
+        self.prop_cycle_limit = 1000000
 
     def calculate_distance_interaction(self):
 
@@ -53,6 +53,7 @@ class mc_packet(object):
         self.grid.Jestimator[self.cell_index] = \
             self.grid.Jestimator[self.cell_index] + \
             l * self.L / (4. * np.pi * self.cell_dx)
+            # l * self.L / (4. * np.pi * self.cell_dx * self.grid.dt)
 
     def interact(self):
 
@@ -110,6 +111,7 @@ class mc_packet(object):
         i = 0
         while 1:
             if i > self.prop_cycle_limit:
+                print ("Cycle Limit reached")
                 return False
             if self.is_escaped:
                 return True
@@ -127,10 +129,11 @@ class mc_packet(object):
 
 class mcrt_grid(object):
     def __init__(self, chi=2.5e-4, S=10., xint=1e6, xmax=5e6, Ncells=100,
-                 Npackets=10000):
+                 Npackets=100):
 
         self.Ncells = Ncells
         self.Npackets = Npackets
+        # self.dt = 1e-10
 
         dx = xmax / float(self.Ncells)
         self.xl = np.arange(self.Ncells) * dx
@@ -141,9 +144,11 @@ class mcrt_grid(object):
         self.eta = np.where(self.xr <= xint, S * chi, 1e-20)
 
         self.Ltot = np.sum(self.eta * self.dx)
+        # self.Ltot = np.sum(self.eta * self.dx * self.dt)
         self.L = self.Ltot / float(self.Npackets)
 
         self.npackets_cell = (self.eta * self.dx / self.L).astype(np.int)
+        # self.npackets_cell = (self.eta * self.dx * self.dt / self.L).astype(np.int)
         self.npackets_cell_cum = np.cumsum(self.npackets_cell)
         self.packets = []
 
