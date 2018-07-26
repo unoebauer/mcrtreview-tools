@@ -55,6 +55,12 @@ class mc_packet(object):
             self.grid.Jestimator[self.cell_index] + \
             l * self.L / (4. * np.pi * self.cell_dx)
             # l * self.L / (4. * np.pi * self.cell_dx * self.grid.dt)
+        self.grid.Hestimator[self.cell_index] = \
+            self.grid.Hestimator[self.cell_index] + \
+            l * self.mu * self.L / (4. * np.pi * self.cell_dx)
+        self.grid.Kestimator[self.cell_index] = \
+            self.grid.Kestimator[self.cell_index] + \
+            l * self.mu**2 * self.L / (4. * np.pi * self.cell_dx)
 
     def interact(self):
 
@@ -162,6 +168,8 @@ class mcrt_grid(object):
         #     self.packets.append(mc_packet(j, self, self.L))
 
         self.Jestimator = np.zeros(self.Ncells)
+        self.Hestimator = np.zeros(self.Ncells)
+        self.Kestimator = np.zeros(self.Ncells)
         print(self.npackets_cell_cum_frac)
 
     def propagate(self):
@@ -191,6 +199,11 @@ class mcrt_grid(object):
             n = n + 1
             print("{:d} packets processed".format(n))
             print("{:d} packets escaped".format(self.Npackets - N))
+
+
+        self.Jestimator = self.Jestimator * self.Npackets / float(n)
+        self.Hestimator = self.Hestimator * self.Npackets / float(n)
+        self.Kestimator = self.Kestimator * self.Npackets / float(n)
 
         # for i, packet in enumerate(self.packets):
 
