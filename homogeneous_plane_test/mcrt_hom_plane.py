@@ -11,7 +11,7 @@ TODO add astropy units support
 """
 
 
-np.random.seed(0)
+np.random.seed(42)
 
 
 def progress(count, total, suffix=''):
@@ -96,7 +96,7 @@ class mc_packet_base(object):
         self.tau = -np.log(np.random.rand(1)[0])
         return self.tau / self.cell_chi
 
-    def update_estimators(self, l):
+    def update_estimators(self, l, mu_mean):
         """Update the MC estimators.
 
         Estimators for the first 3 moments of the specific intensity, J, H, K
@@ -106,16 +106,18 @@ class mc_packet_base(object):
         ----------
         l : float
             Length of the current trajectory segment
+        mu_mean : float
+            mean propagation direction
         """
         self.grid.Jestimator[self.cell_index] = \
             self.grid.Jestimator[self.cell_index] + \
             l * self.L / (4. * np.pi * self.cell_dV)
         self.grid.Hestimator[self.cell_index] = \
             self.grid.Hestimator[self.cell_index] + \
-            l * self.mu * self.L / (4. * np.pi * self.cell_dV)
+            l * mu_mean * self.L / (4. * np.pi * self.cell_dV)
         self.grid.Kestimator[self.cell_index] = \
             self.grid.Kestimator[self.cell_index] + \
-            l * self.mu**2 * self.L / (4. * np.pi * self.cell_dV)
+            l * mu_mean**2 * self.L / (4. * np.pi * self.cell_dV)
 
     def interact(self):
         """Perform interaction
@@ -123,8 +125,9 @@ class mc_packet_base(object):
         The estimators are updated, the packet is absorbed and the respective
         flag set.
         """
-
-        self.update_estimators(self.l_int)
+        x, mu = self.update_position_direction(self.l_int)
+        mu_mean = self.calculate_mean_mu(self.x, x, self.l_int)
+        self.update_estimators(self.l_int, mu_mean)
         self.is_absorbed = True
 
     def propagate(self):
@@ -162,15 +165,82 @@ class mc_packet_spherical_geom_mixin(object):
 
     def initialize_position(self):
 
-        pass
+        self.x = self.cell_xl + self.cell_dx * np.random.rand(1)[0]**(1./3.)
 
     def calculate_distance_edge(self):
 
-        pass
+        mu_star = -np.sqrt(1. - (self.cell_xl / self.x)**2)
+
+        if self.mu <= mu_star:
+
+            l_edge = (-self.mu * self.x -
+                      np.sqrt(self.mu**2 * self.x**2 -
+                              self.x**2 + self.cell_xl**2))
+            self.next_cell_index = self.cell_index - 1
+
+        else:
+
+            l_edge = (-self.mu * self.x +
+                      np.sqrt(self.mu**2 * self.x**2 -
+                              self.x**2 + self.cell_xr**2))
+            self.next_cell_index = self.cell_index + 1
+
+        return l_edge
+
+    def update_position_direction(self, l):
+
+        x = np.sqrt(self.x**2 + l**2 + 2 * l * self.x * self.mu)
+        mu = (l + self.x * self.mu) / x
+
+        return x, mu
+
+    def calculate_mean_mu(self, xi, xf, l):
+
+        return (xf - xi) / l
 
     def change_cell(self):
 
-        pass
+        x, mu = self.update_position_direction(self.l_edge)
+        mu_mean = self.calculate_mean_mu(self.x, x, self.l_edge)
+        self.update_estimators(self.l_edge, mu_mean)
+
+        if self.next_cell_index == self.grid.Ncells:
+            # packet escapes
+            self.is_escaped = True
+            self.mu = mu
+            self.x = self.cell_xr
+
+        elif self.next_cell_index == -1:
+            # packets gets reflected
+
+            # TODO turn into a more descriptive error message
+            raise ValueError("Something went wrong - no inner boundary")
+
+        else:
+            # packet is transported into target cell
+
+            self.mu = mu
+
+            if self.next_cell_index > self.cell_index:
+                # packet is moved one cell to the right
+
+                self.x = self.grid.xl[self.next_cell_index]
+
+            else:
+                # packet is moved one cell to the left
+
+                self.x = self.grid.xr[self.next_cell_index]
+
+            # reset cell-based properties for easy access
+            self.cell_index = self.next_cell_index
+            self.cell_chi = self.grid.chi[self.cell_index]
+            self.cell_xl = self.grid.xl[self.cell_index]
+            self.cell_xr = self.grid.xr[self.cell_index]
+            self.cell_dx = self.grid.dx[self.cell_index]
+            self.cell_dV = self.grid.dV[self.cell_index]
+
+            # recalculate distances
+            self.calculate_and_set_propagation_distances()
 
 
 class mc_packet_planar_geom_mixin(object):
@@ -203,6 +273,34 @@ class mc_packet_planar_geom_mixin(object):
 
         return dx / self.mu
 
+    def calculate_mean_mu(self, xi, xf, l):
+
+        return self.mu
+
+    def update_position_direction(self, l):
+        """Update position and direction of packet
+
+        Calculate and return the new position and propagation direction after
+        having covered the distance l.
+
+        Parameters
+        ----------
+        l : float
+            travel distance
+
+        Returns
+        -------
+        x : float
+            new position
+        mu : float
+            new propagation direction
+        """
+
+        x = self.x + self.mu * l
+        mu = self.mu
+
+        return x, mu
+
     def change_cell(self):
         """Handle propagation through cell interface
 
@@ -212,7 +310,10 @@ class mc_packet_planar_geom_mixin(object):
         left boundary of the computational domain, it is reflected.
         """
         # TODO: assess whether this may partly moved into the base class
-        self.update_estimators(self.l_edge)
+
+        x, mu = self.update_position_direction(self.l_edge)
+        mu_mean = self.calculate_mean_mu(self.x, x, self.l_edge)
+        self.update_estimators(self.l_edge, mu_mean)
 
         if self.next_cell_index == self.grid.Ncells:
             # packet escapes
@@ -279,7 +380,9 @@ class mc_packet_spherical(mc_packet_base, mc_packet_spherical_geom_mixin):
 
         super(mc_packet_spherical, self).__init__(i, grid, L)
 
-        raise NotImplementedError
+        self.initialize_position()
+        self.initialize_direction()
+        self.calculate_and_set_propagation_distances()
 
 
 class mcrt_grid_base(object):
@@ -319,7 +422,7 @@ class mcrt_grid_base(object):
         assert(xint < xmax)
 
         self.S = S
-        self.xint
+        self.xint = xint
 
         self.Ncells = Ncells
         self.Npackets = Npackets
@@ -411,11 +514,11 @@ class mcrt_grid_spherical_geom_mixin(object):
 
     def determine_cell_volume(self):
 
-        pass
+        self.dV = 4. * np.pi / 3. * (self.xr**3 - self.xl**3)
 
     def init_packet(self, i):
 
-        pass
+        return mc_packet_spherical(i, self, self.L)
 
     def determine_analytic_solution(self):
 
@@ -454,6 +557,20 @@ class mcrt_grid_planar(mcrt_grid_base, mcrt_grid_planar_geom_mixin):
         super(mcrt_grid_planar, self).__init__(chi=chi, S=S, xint=xint,
                                                xmax=xmax, Ncells=Ncells,
                                                Npackets=Npackets)
+
+        self.determine_cell_volume()
+        self.determine_number_of_packets()
+
+        self.propagate()
+
+
+class mcrt_grid_spherical(mcrt_grid_base, mcrt_grid_spherical_geom_mixin):
+    def __init__(self, chi=2.5e-4, S=10., xint=1e6, xmax=5e6, Ncells=100,
+                 Npackets=1000000):
+
+        super(mcrt_grid_spherical, self).__init__(chi=chi, S=S, xint=xint,
+                                                  xmax=xmax, Ncells=Ncells,
+                                                  Npackets=Npackets)
 
         self.determine_cell_volume()
         self.determine_number_of_packets()
