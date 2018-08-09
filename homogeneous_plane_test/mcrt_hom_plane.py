@@ -165,7 +165,9 @@ class mc_packet_spherical_geom_mixin(object):
 
     def initialize_position(self):
 
-        self.x = self.cell_xl + self.cell_dx * np.random.rand(1)[0]**(1./3.)
+        self.x = (self.cell_xl**3 +
+                  (self.cell_xr**3 - self.cell_xl**3) *
+                  np.random.rand(1)[0])**(1./3.)
 
     def calculate_distance_edge(self):
 
@@ -250,7 +252,7 @@ class mc_packet_planar_geom_mixin(object):
     def initialize_position(self):
         """Initialize position of MC packet
 
-        The packet is placed unifromly within the current grid cell.
+        The packet is placed uniformly within the current grid cell.
         """
         self.x = self.cell_xl + self.cell_dx * np.random.rand(1)[0]
 
