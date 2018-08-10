@@ -1,13 +1,19 @@
 from __future__ import print_function
 import sys
 import numpy as np
+from scipy.integrate import quad
 """
 This module contains tools to perform time-independent MCRT calculations to
 determine the steady-state solution for radiative transfer in the homogeneous
 sphere/plane test problems described in the MCRT review.
 
-TODO introduce logging
+TODO introduce more sensible ordering of classes and functions
+TODO add propagated flag to avoid duplicate propagation
+TODO improve Exception Handling
+TODO introduce logging support
 TODO add astropy units support
+TODO add missing docstrings
+TODO add example use cases (to produce figures in review)
 """
 
 
@@ -425,6 +431,7 @@ class mcrt_grid_base(object):
 
         self.S = S
         self.xint = xint
+        self.chi_base = chi
 
         self.Ncells = Ncells
         self.Npackets = Npackets
@@ -448,6 +455,28 @@ class mcrt_grid_base(object):
         # opacity and emissivity
         self.chi = np.where(self.xr <= xint, chi, 1e-20)
         self.eta = np.where(self.xr <= xint, S * chi, 1e-20)
+
+        self._Janalytic = None
+        self._Hanalytic = None
+        self._Kanalytic = None
+
+    @property
+    def Janalytic(self):
+        if self._Janalytic is None:
+            self.determine_analytic_solution()
+        return self._Janalytic
+
+    @property
+    def Hanalytic(self):
+        if self._Hanalytic is None:
+            self.determine_analytic_solution()
+        return self._Hanalytic
+
+    @property
+    def Kanalytic(self):
+        if self._Kanalytic is None:
+            self.determine_analytic_solution()
+        return self._Kanalytic
 
     def determine_number_of_packets(self):
         """Determine number of packets which are initialized in each cell
@@ -506,10 +535,10 @@ class mcrt_grid_planar_geom_mixin(object):
         """Calculate analytic solution for J, H, K in the case of a
         homogeneous plane"""
 
-        self.Janalytic = np.where(self.xr <= self.xint, self.S, 0.5 * self.S)
-        self.Hanalytic = np.where(self.xr <= self.xint, 0, 0.25 * self.S)
-        self.Kanalytic = np.where(self.xr <= self.xint, 1./3. * self.S,
-                                  1./6. * self.S)
+        self._Janalytic = np.where(self.xr <= self.xint, self.S, 0.5 * self.S)
+        self._Hanalytic = np.where(self.xr <= self.xint, 0, 0.25 * self.S)
+        self._Kanalytic = np.where(self.xr <= self.xint, 1./3. * self.S,
+                                   1./6. * self.S)
 
 
 class mcrt_grid_spherical_geom_mixin(object):
@@ -524,7 +553,24 @@ class mcrt_grid_spherical_geom_mixin(object):
 
     def determine_analytic_solution(self):
 
-        pass
+        solver = analytic_solution_homogeneous_sphere(S=self.S,
+                                                      chi=self.chi_base,
+                                                      R=self.xint)
+
+        r = 0.5 * (self.xl + self.xr)
+
+        Janalytic = []
+        Hanalytic = []
+        Kanalytic = []
+
+        for ri in r:
+            Janalytic.append(solver.J(ri))
+            Hanalytic.append(solver.H(ri))
+            Kanalytic.append(solver.K(ri))
+
+        self._Janalytic = np.array(Janalytic)
+        self._Hanalytic = np.array(Hanalytic)
+        self._Kanalytic = np.array(Kanalytic)
 
 
 class mcrt_grid_planar(mcrt_grid_base, mcrt_grid_planar_geom_mixin):
@@ -578,3 +624,124 @@ class mcrt_grid_spherical(mcrt_grid_base, mcrt_grid_spherical_geom_mixin):
         self.determine_number_of_packets()
 
         self.propagate()
+
+
+class analytic_solution_homogeneous_sphere(object):
+    def __init__(self, S=10, R=1e6, chi=2.5e-4):
+
+        self.S = S
+        self.R = R
+        self.chi = chi
+
+    def mu_star(self, r):
+
+        return np.sqrt(1. - (self.R / r)**2)
+
+    def g(self, r, mu):
+
+        return np.sqrt(1. - (r / self.R)**2 * (1. - mu**2))
+
+    def s(self, r, mu):
+
+        assert(mu <= 1)
+
+        if r < self.R:
+            return r * mu + self.R * self.g(r, mu)
+        else:
+            if self.mu_star(r) <= mu:
+                return 2. * self.R * self.g(r, mu)
+            else:
+                return 0
+
+    def J_integ_inside(self, mu, r):
+
+        res = (np.cosh(self.chi * r * mu) *
+               np.exp(-self.chi * self.R * self.g(r, mu)))
+        return res
+
+    def J_integ_outside(self, mu, r):
+
+        return np.exp(-2. * self.chi * self.R * self.g(r, mu))
+
+    def J_inside(self, r):
+
+        return self.S * (1. - quad(self.J_integ_inside, 0, 1, args=(r,))[0])
+
+    def J_outside(self, r):
+
+        mu_star = self.mu_star(r)
+
+        res = 0.5 * self.S * ((1. - mu_star) -
+                              quad(self.J_integ_outside, mu_star, 1,
+                                   args=(r,))[0])
+        return res
+
+    def H_integ_inside(self, mu, r):
+
+        res = (mu * np.sinh(self.chi * r * mu) *
+               np.exp(-self.chi * self.R * self.g(r, mu)))
+
+        return res
+
+    def H_integ_outside(self, mu, r):
+
+        return mu * np.exp(-2. * self.R * self.g(r, mu))
+
+    def K_integ_inside(self, mu, r):
+
+        res = (mu**2 * np.cosh(self.chi * r * mu) *
+               np.exp(-self.chi * self.R * self.g(r, mu)))
+
+        return res
+
+    def K_integ_outside(self, mu, r):
+
+        return mu**2 * np.exp(-2. * self.chi * self.R * self.g(r, mu))
+
+    def H_inside(self, r):
+
+        return self.S * quad(self.H_integ_inside, 0, 1, args=(r,))[0]
+
+    def H_outside(self, r):
+
+        mu_star = self.mu_star(r)
+
+        res = 0.5 * self.S * (0.5 * (1. - mu_star**2) -
+                              quad(self.H_integ_outside, mu_star, 1,
+                                   args=(r,))[0])
+        return res
+
+    def K_inside(self, r):
+
+        return self.S * (1./3. - quad(self.K_integ_inside, 0, 1, args=(r,))[0])
+
+    def K_outside(self, r):
+
+        mu_star = self.mu_star(r)
+
+        res = 0.5 * self.S * (1./3. * (1. - mu_star**3) -
+                              quad(self.K_integ_outside, mu_star, 1,
+                                   args=(r,))[0])
+
+        return res
+
+    def J(self, r):
+
+        if r <= self.R:
+            return self.J_inside(r)
+        else:
+            return self.J_outside(r)
+
+    def H(self, r):
+
+        if r <= self.R:
+            return self.H_inside(r)
+        else:
+            return self.H_outside(r)
+
+    def K(self, r):
+
+        if r <= self.R:
+            return self.K_inside(r)
+        else:
+            return self.K_outside(r)
