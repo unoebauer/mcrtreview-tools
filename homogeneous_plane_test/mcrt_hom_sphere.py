@@ -746,17 +746,20 @@ class analytic_solution_homogeneous_sphere(object):
             return self.K_outside(r)
 
 
-def perform_example_simulation_spherical():
+def perform_example_simulation(mode="spherical", Npackets=10000):
     import matplotlib.pyplot as plt
 
-    Npackets = 10000
+    assert(mode in ["planar", "spherical"])
 
     J_est = []
     H_est = []
     K_est = []
     for i in range(10):
         logging.info("Doing Iteration {:d}".format(i))
-        mcrt = mcrt_grid_spherical(Npackets=Npackets)
+        if mode == "planar":
+            mcrt = mcrt_grid_planar(Npackets=Npackets)
+        else:
+            mcrt = mcrt_grid_spherical(Npackets=Npackets)
         J_est.append(mcrt.Jestimator)
         H_est.append(mcrt.Hestimator)
         K_est.append(mcrt.Kestimator)
@@ -794,4 +797,4 @@ def perform_example_simulation_spherical():
 
 if __name__ == "__main__":
 
-    perform_example_simulation_spherical()
+    perform_example_simulation(mode="spherical")
