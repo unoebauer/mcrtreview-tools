@@ -8,15 +8,16 @@ This module contains tools to perform time-independent MCRT calculations to
 determine the steady-state solution for radiative transfer in the homogeneous
 sphere/plane test problems described in the MCRT review.
 
-TODO add astropy units support
-TODO add missing docstrings
-TODO add tqdm support
+References:
+    Abdikamalov et al. 2012 ApJ, 2012, 755, 111
 """
+
 
 logging.basicConfig(
     level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
+# set random seed for reproducibility
 np.random.seed(42)
 
 
@@ -64,11 +65,13 @@ class mc_packet_base(object):
         # or escaped from the domain
         self.is_absorbed = False
         self.is_escaped = False
+
+        # flag to avoid multiple propagation
         self.is_active = True
 
         # a safety counter, used in the propagation loop to avoid an infinity
         # loop
-        self.prop_cycle_limit = 1000000
+        self._prop_cycle_limit = 1000000
 
     def initialize_direction(self):
         """Set the initial isotropic propagation direction"""
@@ -132,6 +135,7 @@ class mc_packet_base(object):
         x, mu = self.update_position_direction(self.l_int)
         mu_mean = self.calculate_mean_mu(self.x, x, self.l_int)
         self.update_estimators(self.l_int, mu_mean)
+
         self.is_absorbed = True
         self.is_active = False
 
@@ -147,6 +151,11 @@ class mc_packet_base(object):
         propagation_status : bool
             flag storing whether the propagation was successful or not, i.e. in
             case prop_cycle_limit was reached.
+
+        Raises
+        ------
+        PropagationException
+            if the packet is propagated multiple times
         """
 
         if not self.is_active:
@@ -154,7 +163,7 @@ class mc_packet_base(object):
 
         i = 0
         while 1:
-            if i > self.prop_cycle_limit:
+            if i > self._prop_cycle_limit:
                 # check safety limit
                 raise PropagationException(
                     "Safety limit in propagation Loop reached")
@@ -200,6 +209,25 @@ class mc_packet_planar_geom_mixin(object):
         return dx / self.mu
 
     def calculate_mean_mu(self, xi, xf, l):
+        """Calculate average mu on trajectory segment
+
+        In planar geometry, this is trivial since the direction cosine does
+        not change between interactions.
+
+        Parameters
+        ----------
+        xi : float
+            initial position
+        xf : float
+            final position
+        l : float
+            length of trajectory segment
+
+        Returns
+        -------
+        mu_mean : float
+            average direction cosine on segment
+        """
 
         return self.mu
 
@@ -257,7 +285,6 @@ class mc_packet_planar_geom_mixin(object):
 
         else:
             # packet is transported into target cell
-
             if self.next_cell_index > self.cell_index:
                 # packet is moved one cell to the right
 
@@ -280,15 +307,27 @@ class mc_packet_planar_geom_mixin(object):
 
 
 class mc_packet_spherical_geom_mixin(object):
-
+    """Mixin class for mc_packet_base, containing all features which pertain
+    to spherical geometry
+    """
     def initialize_position(self):
+        """Initialize position of MC packet
 
+        The packet is placed uniformly within the current grid cell. Hereby,
+        the cell-volume growth with radius is taken into account.
+        """
         self.x = (self.cell_xl**3 +
                   (self.cell_xr**3 - self.cell_xl**3) *
                   np.random.rand(1)[0])**(1./3.)
 
     def calculate_distance_edge(self):
+        """Calculate distance to next cell edge
 
+        Returns
+        -------
+        l_edge : float
+            distance to next cell edge
+        """
         mu_star = -np.sqrt(1. - (self.cell_xl / self.x)**2)
 
         if self.mu <= mu_star:
@@ -307,18 +346,68 @@ class mc_packet_spherical_geom_mixin(object):
 
         return l_edge
 
+    def calculate_mean_mu(self, xi, xf, l):
+        """Calculate average mu on trajectory segment
+
+        In spherical geometry, the directional cosine continuously changes
+        during propagation. Here, the mean cosine is calculated, specifically
+        the integration 1/l \int_0^l \mu d\mu is solved.
+
+        Parameters
+        ----------
+        xi : float
+            initial position
+        xf : float
+            final position
+        l : float
+            length of trajectory segment
+
+        Returns
+        -------
+        mu_mean : float
+            average direction cosine on segment
+        """
+
+        return (xf - xi) / l
+
     def update_position_direction(self, l):
+        """Update position and direction of packet
+
+        Calculate and return the new position and propagation direction after
+        having covered the distance l.
+
+        Parameters
+        ----------
+        l : float
+            travel distance
+
+        Returns
+        -------
+        x : float
+            new position
+        mu : float
+            new propagation direction
+        """
 
         x = np.sqrt(self.x**2 + l**2 + 2 * l * self.x * self.mu)
         mu = (l + self.x * self.mu) / x
 
         return x, mu
 
-    def calculate_mean_mu(self, xi, xf, l):
-
-        return (xf - xi) / l
-
     def change_cell(self):
+        """Handle propagation through cell interface
+
+        If the next event is a cell crossing, i.e. l_edge < l_int, the packet
+        is placed in the target cell. If the packet hereby escapes through the
+        outer cell interface, the respective flag is set. Since a entire sphere
+        is considered, the computation domain does not have an inner boundary
+
+        Raises
+        ------
+        GeometryException
+            if for some reason the next_cell_index has been set to -1, which
+            would correspond to a crossing of a (non-existent) inner boundary
+        """
 
         x, mu = self.update_position_direction(self.l_edge)
         mu_mean = self.calculate_mean_mu(self.x, x, self.l_edge)
@@ -386,6 +475,19 @@ class mc_packet_planar(mc_packet_base, mc_packet_planar_geom_mixin):
 
 
 class mc_packet_spherical(mc_packet_base, mc_packet_spherical_geom_mixin):
+    """Class for MC packets propagating in domains with spherical symmetry
+
+    Parameters
+    ----------
+    i : int
+        index of the cell in which the packet is initialized
+    grid : mcrt_grid_base object
+        grid object containing the computational mesh for the MCRT simulation,
+        has to be an instance of mcrt_grid_base
+    L : float
+        packet luminosity
+
+    """
     def __init__(self, i, grid, L):
 
         super(mc_packet_spherical, self).__init__(i, grid, L)
@@ -464,18 +566,24 @@ class mcrt_grid_base(object):
 
     @property
     def Janalytic(self):
+        """Analytic prediction for the zeroth-moment of the specific
+        intensity"""
         if self._Janalytic is None:
             self.determine_analytic_solution()
         return self._Janalytic
 
     @property
     def Hanalytic(self):
+        """Analytic prediction for the first-moment of the specific
+        intensity"""
         if self._Hanalytic is None:
             self.determine_analytic_solution()
         return self._Hanalytic
 
     @property
     def Kanalytic(self):
+        """Analytic prediction for the second-moment of the specific
+        intensity"""
         if self._Kanalytic is None:
             self.determine_analytic_solution()
         return self._Kanalytic
@@ -541,16 +649,22 @@ class mcrt_grid_planar_geom_mixin(object):
 
 
 class mcrt_grid_spherical_geom_mixin(object):
-
+    """Mixin class containing all geometry-dependent features for the
+    mcrt_grid_base class to set up a spherically symmetric domain.
+    """
     def determine_cell_volume(self):
+        """Determine cell volume"""
 
         self.dV = 4. * np.pi / 3. * (self.xr**3 - self.xl**3)
 
     def init_packet(self, i):
+        """Initialize a MC packet in spherical geometry"""
 
         return mc_packet_spherical(i, self, self.L)
 
     def determine_analytic_solution(self):
+        """Calculate analytic solution for J, H, K in the case of a
+        homogeneous sphere"""
 
         solver = analytic_solution_homogeneous_sphere(S=self.S,
                                                       chi=self.chi_base,
@@ -612,6 +726,31 @@ class mcrt_grid_planar(mcrt_grid_base, mcrt_grid_planar_geom_mixin):
 
 
 class mcrt_grid_spherical(mcrt_grid_base, mcrt_grid_spherical_geom_mixin):
+    """Class to perform a MCRT simulation for the homogeneous sphere problem
+
+    A domain is set up, which contains a optically thick region and a
+    transparent region. Packets will be initialized according to the local
+    emissivity and propagated until absorption or escape (through the
+    right boundary at xmax).
+
+    Parameters
+    ----------
+    chi : float
+        absorption opacity, units of 1/cm (default 2.5e-4)
+    S : float
+        source function, units of erg/s/cm^2 (default 10)
+    xint : float
+        location of the interface between optically thick and transparent
+        regions of the computational domain, units of cm; must be smaller than
+        xmax (default 1e6)
+    xmax : float
+        extent of the computational domain, interpreted as the outer/right
+        boundary of the domain, units of cm (default 5e6)
+    Ncells : int
+        number of grid cells in the domain (default 100)
+    Npackets : int
+        number of MC packets used in the MCRT simulation (default 1e6)
+    """
     def __init__(self, chi=2.5e-4, S=10., xint=1e6, xmax=5e6, Ncells=100,
                  Npackets=1000000):
 
@@ -626,6 +765,19 @@ class mcrt_grid_spherical(mcrt_grid_base, mcrt_grid_spherical_geom_mixin):
 
 
 class analytic_solution_homogeneous_sphere(object):
+    """Class providing functionality to calculate the analytic solution for
+    the homogeneous sphere problem
+
+    Parameters
+    ----------
+    S : float
+        source function (default 10)
+    R : float
+        radius of sphere in cm (default 1e6)
+    chi : float
+        constant absorption opacity in 1/cm (default 2.5e-4)
+
+    """
     def __init__(self, S=10, R=1e6, chi=2.5e-4):
 
         self.S = S
@@ -633,14 +785,58 @@ class analytic_solution_homogeneous_sphere(object):
         self.chi = chi
 
     def mu_star(self, r):
+        """Calculate limiting directional cosine
+
+        See Abdikamalov et al. 2012, Eq. 159
+
+        Parameters
+        ----------
+        r : float
+            radius
+
+        Returns
+        -------
+        mu_star : float
+            limiting cosine
+        """
 
         return np.sqrt(1. - (self.R / r)**2)
 
     def g(self, r, mu):
+        """Calculate auxiliary function g
+
+        See Abdikamalov et al. 2012, Eq. 160
+
+        Parameters
+        ----------
+        r : float
+            radius
+        mu : float
+            directional cosine
+
+        Returns
+        -------
+        g : float
+        """
 
         return np.sqrt(1. - (r / self.R)**2 * (1. - mu**2))
 
     def s(self, r, mu):
+        """Calculate auxiliary function s
+
+        See Abdikamalov et al. 2012, Eq. 159
+
+        Parameters
+        ----------
+        r : float
+            radius
+        mu : float
+            directional cosine
+
+        Returns
+        -------
+        s : float
+        """
 
         assert(mu <= 1)
 
@@ -653,20 +849,49 @@ class analytic_solution_homogeneous_sphere(object):
                 return 0
 
     def J_integ_inside(self, mu, r):
-
+        """Integrand for solving J inside the sphere"""
         res = (np.cosh(self.chi * r * mu) *
                np.exp(-self.chi * self.R * self.g(r, mu)))
         return res
 
     def J_integ_outside(self, mu, r):
+        """Integrand for solving J outside the sphere"""
 
         return np.exp(-2. * self.chi * self.R * self.g(r, mu))
 
+    def H_integ_inside(self, mu, r):
+        """Integrand for solving J inside the sphere"""
+
+        res = (mu * np.sinh(self.chi * r * mu) *
+               np.exp(-self.chi * self.R * self.g(r, mu)))
+
+        return res
+
+    def H_integ_outside(self, mu, r):
+        """Integrand for solving H outside the sphere"""
+
+        return mu * np.exp(-2. * self.R * self.g(r, mu))
+
+    def K_integ_inside(self, mu, r):
+        """Integrand for solving K inside the sphere"""
+
+        res = (mu**2 * np.cosh(self.chi * r * mu) *
+               np.exp(-self.chi * self.R * self.g(r, mu)))
+
+        return res
+
+    def K_integ_outside(self, mu, r):
+        """Integrand for solving K outside the sphere"""
+
+        return mu**2 * np.exp(-2. * self.chi * self.R * self.g(r, mu))
+
     def J_inside(self, r):
+        """Calculate J inside sphere"""
 
         return self.S * (1. - quad(self.J_integ_inside, 0, 1, args=(r,))[0])
 
     def J_outside(self, r):
+        """Calculate J outside sphere"""
 
         mu_star = self.mu_star(r)
 
@@ -675,33 +900,13 @@ class analytic_solution_homogeneous_sphere(object):
                                    args=(r,))[0])
         return res
 
-    def H_integ_inside(self, mu, r):
-
-        res = (mu * np.sinh(self.chi * r * mu) *
-               np.exp(-self.chi * self.R * self.g(r, mu)))
-
-        return res
-
-    def H_integ_outside(self, mu, r):
-
-        return mu * np.exp(-2. * self.R * self.g(r, mu))
-
-    def K_integ_inside(self, mu, r):
-
-        res = (mu**2 * np.cosh(self.chi * r * mu) *
-               np.exp(-self.chi * self.R * self.g(r, mu)))
-
-        return res
-
-    def K_integ_outside(self, mu, r):
-
-        return mu**2 * np.exp(-2. * self.chi * self.R * self.g(r, mu))
-
     def H_inside(self, r):
+        """Calculate H inside sphere"""
 
         return self.S * quad(self.H_integ_inside, 0, 1, args=(r,))[0]
 
     def H_outside(self, r):
+        """Calculate H outside sphere"""
 
         mu_star = self.mu_star(r)
 
@@ -711,10 +916,12 @@ class analytic_solution_homogeneous_sphere(object):
         return res
 
     def K_inside(self, r):
+        """Calculate K inside sphere"""
 
         return self.S * (1./3. - quad(self.K_integ_inside, 0, 1, args=(r,))[0])
 
     def K_outside(self, r):
+        """Calculate K outside sphere"""
 
         mu_star = self.mu_star(r)
 
@@ -725,6 +932,7 @@ class analytic_solution_homogeneous_sphere(object):
         return res
 
     def J(self, r):
+        """Calculate analytic solution for J at position r"""
 
         if r <= self.R:
             return self.J_inside(r)
@@ -732,6 +940,7 @@ class analytic_solution_homogeneous_sphere(object):
             return self.J_outside(r)
 
     def H(self, r):
+        """Calculate analytic solution for H at position r"""
 
         if r <= self.R:
             return self.H_inside(r)
@@ -739,6 +948,7 @@ class analytic_solution_homogeneous_sphere(object):
             return self.H_outside(r)
 
     def K(self, r):
+        """Calculate analytic solution for K at position r"""
 
         if r <= self.R:
             return self.K_inside(r)
@@ -747,6 +957,24 @@ class analytic_solution_homogeneous_sphere(object):
 
 
 def perform_example_simulation(mode="spherical", Npackets=10000):
+    """Illustration for the use of the homogeneous sphere/plane MCRT simulation
+    tools
+
+    This routine also produces a illustration of the results. The corresponding
+    figure in the estimators section of the MCRT review has been produced with
+    this routine
+
+    WARNING: this routine will perform the MCRT simulation 10 times with
+    different seeds to obtain confidence intervals.
+
+    Parameters
+    ----------
+    mode : {'spherical', 'planar'}
+        flag determining the geometry of the MCRT simulation (default
+        'spherical')
+    Npackets : int
+        number of packets used in each MCRT simulation (default 10000)
+    """
     import matplotlib.pyplot as plt
 
     assert(mode in ["planar", "spherical"])
@@ -771,7 +999,7 @@ def perform_example_simulation(mode="spherical", Npackets=10000):
     colors = plt.rcParams["axes.color_cycle"]
     labels = [r"$J$", r"$H$", r"$K$"]
 
-    x = (mcrt.xl + mcrt.xr) * 0.5 * 1e-6
+    x = (mcrt.xl + mcrt.xr) * 0.5 * 1e-5
 
     for y in [mcrt.Janalytic, mcrt.Hanalytic, mcrt.Kanalytic]:
         plt.plot(x, y / mcrt.S, ls="dashed", color="black")
@@ -788,8 +1016,8 @@ def perform_example_simulation(mode="spherical", Npackets=10000):
                  label=labels[i], markerfacecolor=(1, 1, 1, 0),
                  markeredgecolor=c)
 
-    plt.legend()
-    plt.xlabel(r"$r$ [cm]")
+    plt.legend(frameon=False)
+    plt.xlabel(r"$r$ [km]")
     plt.ylabel(r"$J/S$, $H/S$, $K/S$")
     plt.autoscale(enable=True, axis='x', tight=True)
     plt.show()
