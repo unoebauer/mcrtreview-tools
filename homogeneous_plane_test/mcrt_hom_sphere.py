@@ -1,6 +1,6 @@
 from __future__ import print_function
-import sys
 import logging
+import tqdm
 import numpy as np
 from scipy.integrate import quad
 """
@@ -28,19 +28,6 @@ class GeometryException(Exception):
 class PropagationException(Exception):
     """Custom Exception for errors related to the propagation of packets"""
     pass
-
-
-def progress(count, total, suffix=''):
-    # See
-    # https://stackoverflow.com/questions/3173320/text-progress-bar-in-the-console
-    bar_len = 60
-    filled_len = int(round(bar_len * count / float(total)))
-
-    percents = round(100.0 * count / float(total), 1)
-    bar = '=' * filled_len + '-' * (bar_len - filled_len)
-
-    sys.stdout.write('[%s] %s%s ...%s\r' % (bar, percents, '%', suffix))
-    sys.stdout.flush()
 
 
 class mc_packet_base(object):
@@ -518,7 +505,7 @@ class mcrt_grid_base(object):
 
         N = self.Npackets
 
-        for j in range(N):
+        for j in tqdm.tqdm(range(N)):
             z = np.random.rand(1)[0]
             i = np.argwhere((self.npackets_cell_cum_frac - z) > 0)[0, 0]
             packet = self.init_packet(i)
@@ -527,8 +514,6 @@ class mcrt_grid_base(object):
                 self.esc_packets_x.append(packet.x)
                 self.esc_packets_mu.append(packet.mu)
                 self.esc_packets_L.append(packet.L)
-
-            progress(j, N, suffix='')
 
 
 class mcrt_grid_planar_geom_mixin(object):
