@@ -1,5 +1,6 @@
 from __future__ import print_function
 import sys
+import logging
 import numpy as np
 from scipy.integrate import quad
 """
@@ -7,20 +8,25 @@ This module contains tools to perform time-independent MCRT calculations to
 determine the steady-state solution for radiative transfer in the homogeneous
 sphere/plane test problems described in the MCRT review.
 
-TODO introduce logging support
 TODO add astropy units support
 TODO add missing docstrings
+TODO add tqdm support
 """
+
+logging.basicConfig(
+    level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 np.random.seed(42)
 
 
 class GeometryException(Exception):
+    """Custom Exception for errors related to the geometry of the setup"""
     pass
 
 
 class PropagationException(Exception):
+    """Custom Exception for errors related to the propagation of packets"""
     pass
 
 
@@ -156,7 +162,7 @@ class mc_packet_base(object):
             case prop_cycle_limit was reached.
         """
 
-        if not self.active:
+        if not self.is_active:
             raise PropagationException("Packet has already been propagated")
 
         i = 0
@@ -764,7 +770,7 @@ def perform_example_simulation_spherical():
     H_est = []
     K_est = []
     for i in range(10):
-        print("Doing Iteration {:d}".format(i))
+        logging.info("Doing Iteration {:d}".format(i))
         mcrt = mcrt_grid_spherical(Npackets=Npackets)
         J_est.append(mcrt.Jestimator)
         H_est.append(mcrt.Hestimator)
