@@ -745,3 +745,54 @@ class analytic_solution_homogeneous_sphere(object):
             return self.K_inside(r)
         else:
             return self.K_outside(r)
+
+
+def perform_example_simulation_spherical():
+    import matplotlib.pyplot as plt
+
+    Npackets = 10000
+
+    J_est = []
+    H_est = []
+    K_est = []
+    for i in range(10):
+        print("Doing Iteration {:d}".format(i))
+        mcrt = mcrt_grid_spherical(Npackets=Npackets)
+        J_est.append(mcrt.Jestimator)
+        H_est.append(mcrt.Hestimator)
+        K_est.append(mcrt.Kestimator)
+
+    J_est = np.array(J_est) / mcrt.S
+    H_est = np.array(H_est) / mcrt.S
+    K_est = np.array(K_est) / mcrt.S
+
+    colors = plt.rcParams["axes.color_cycle"]
+    labels = [r"$J$", r"$H$", r"$K$"]
+
+    x = (mcrt.xl + mcrt.xr) * 0.5 * 1e-6
+
+    for y in [mcrt.Janalytic, mcrt.Hanalytic, mcrt.Kanalytic]:
+        plt.plot(x, y / mcrt.S, ls="dashed", color="black")
+
+    for i, y in enumerate([J_est, H_est, K_est]):
+        c = colors[i]
+        plt.fill_between(x, y.mean(axis=0) - 2. * y.std(axis=0),
+                         y.mean(axis=0) + 2. * y.std(axis=0),
+                         alpha=0.25, color=c)
+        plt.fill_between(x, y.mean(axis=0) - y.std(axis=0),
+                         y.mean(axis=0) + y.std(axis=0),
+                         alpha=0.5, color=c)
+        plt.plot(x, y.mean(axis=0), color=c, marker="o", ls="",
+                 label=labels[i], markerfacecolor=(1, 1, 1, 0),
+                 markeredgecolor=c)
+
+    plt.legend()
+    plt.xlabel(r"$r$ [cm]")
+    plt.ylabel(r"$J/S$, $H/S$, $K/S$")
+    plt.autoscale(enable=True, axis='x', tight=True)
+    plt.show()
+
+
+if __name__ == "__main__":
+
+    perform_example_simulation_spherical()
