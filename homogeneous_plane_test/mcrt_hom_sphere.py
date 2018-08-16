@@ -7,17 +7,21 @@ This module contains tools to perform time-independent MCRT calculations to
 determine the steady-state solution for radiative transfer in the homogeneous
 sphere/plane test problems described in the MCRT review.
 
-TODO introduce more sensible ordering of classes and functions
-TODO add propagated flag to avoid duplicate propagation
-TODO improve Exception Handling
 TODO introduce logging support
 TODO add astropy units support
 TODO add missing docstrings
-TODO add example use cases (to produce figures in review)
 """
 
 
 np.random.seed(42)
+
+
+class GeometryException(Exception):
+    pass
+
+
+class PropagationException(Exception):
+    pass
 
 
 def progress(count, total, suffix=''):
@@ -67,6 +71,7 @@ class mc_packet_base(object):
         # or escaped from the domain
         self.is_absorbed = False
         self.is_escaped = False
+        self.is_active = True
 
         # a safety counter, used in the propagation loop to avoid an infinity
         # loop
@@ -135,6 +140,7 @@ class mc_packet_base(object):
         mu_mean = self.calculate_mean_mu(self.x, x, self.l_int)
         self.update_estimators(self.l_int, mu_mean)
         self.is_absorbed = True
+        self.is_active = False
 
     def propagate(self):
         """Propagate packet
@@ -150,105 +156,24 @@ class mc_packet_base(object):
             case prop_cycle_limit was reached.
         """
 
+        if not self.active:
+            raise PropagationException("Packet has already been propagated")
+
         i = 0
         while 1:
             if i > self.prop_cycle_limit:
                 # check safety limit
-                print("Cycle Limit reached")
-                return False
+                raise PropagationException(
+                    "Safety limit in propagation Loop reached")
             if self.is_escaped or self.is_absorbed:
                 # check for escape or absorption
-                return True
+                break
             if self.l_int < self.l_edge:
                 # check which event occurs next
                 self.interact()
             else:
                 self.change_cell()
             i = i+1
-
-
-class mc_packet_spherical_geom_mixin(object):
-
-    def initialize_position(self):
-
-        self.x = (self.cell_xl**3 +
-                  (self.cell_xr**3 - self.cell_xl**3) *
-                  np.random.rand(1)[0])**(1./3.)
-
-    def calculate_distance_edge(self):
-
-        mu_star = -np.sqrt(1. - (self.cell_xl / self.x)**2)
-
-        if self.mu <= mu_star:
-
-            l_edge = (-self.mu * self.x -
-                      np.sqrt(self.mu**2 * self.x**2 -
-                              self.x**2 + self.cell_xl**2))
-            self.next_cell_index = self.cell_index - 1
-
-        else:
-
-            l_edge = (-self.mu * self.x +
-                      np.sqrt(self.mu**2 * self.x**2 -
-                              self.x**2 + self.cell_xr**2))
-            self.next_cell_index = self.cell_index + 1
-
-        return l_edge
-
-    def update_position_direction(self, l):
-
-        x = np.sqrt(self.x**2 + l**2 + 2 * l * self.x * self.mu)
-        mu = (l + self.x * self.mu) / x
-
-        return x, mu
-
-    def calculate_mean_mu(self, xi, xf, l):
-
-        return (xf - xi) / l
-
-    def change_cell(self):
-
-        x, mu = self.update_position_direction(self.l_edge)
-        mu_mean = self.calculate_mean_mu(self.x, x, self.l_edge)
-        self.update_estimators(self.l_edge, mu_mean)
-
-        if self.next_cell_index == self.grid.Ncells:
-            # packet escapes
-            self.is_escaped = True
-            self.mu = mu
-            self.x = self.cell_xr
-
-        elif self.next_cell_index == -1:
-            # packets gets reflected
-
-            # TODO turn into a more descriptive error message
-            raise ValueError("Something went wrong - no inner boundary")
-
-        else:
-            # packet is transported into target cell
-
-            self.mu = mu
-
-            if self.next_cell_index > self.cell_index:
-                # packet is moved one cell to the right
-
-                self.x = self.grid.xl[self.next_cell_index]
-
-            else:
-                # packet is moved one cell to the left
-
-                self.x = self.grid.xr[self.next_cell_index]
-
-            # reset cell-based properties for easy access
-            self.cell_index = self.next_cell_index
-            self.cell_chi = self.grid.chi[self.cell_index]
-            self.cell_xl = self.grid.xl[self.cell_index]
-            self.cell_xr = self.grid.xr[self.cell_index]
-            self.cell_dx = self.grid.dx[self.cell_index]
-            self.cell_dV = self.grid.dV[self.cell_index]
-
-            # recalculate distances
-            self.calculate_and_set_propagation_distances()
 
 
 class mc_packet_planar_geom_mixin(object):
@@ -326,6 +251,7 @@ class mc_packet_planar_geom_mixin(object):
         if self.next_cell_index == self.grid.Ncells:
             # packet escapes
             self.is_escaped = True
+            self.is_active = False
             self.x = self.cell_xr
 
         elif self.next_cell_index == -1:
@@ -355,6 +281,89 @@ class mc_packet_planar_geom_mixin(object):
             self.cell_xl = self.grid.xl[self.cell_index]
             self.cell_xr = self.grid.xr[self.cell_index]
             self.cell_dx = self.grid.dx[self.cell_index]
+
+            # recalculate distances
+            self.calculate_and_set_propagation_distances()
+
+
+class mc_packet_spherical_geom_mixin(object):
+
+    def initialize_position(self):
+
+        self.x = (self.cell_xl**3 +
+                  (self.cell_xr**3 - self.cell_xl**3) *
+                  np.random.rand(1)[0])**(1./3.)
+
+    def calculate_distance_edge(self):
+
+        mu_star = -np.sqrt(1. - (self.cell_xl / self.x)**2)
+
+        if self.mu <= mu_star:
+
+            l_edge = (-self.mu * self.x -
+                      np.sqrt(self.mu**2 * self.x**2 -
+                              self.x**2 + self.cell_xl**2))
+            self.next_cell_index = self.cell_index - 1
+
+        else:
+
+            l_edge = (-self.mu * self.x +
+                      np.sqrt(self.mu**2 * self.x**2 -
+                              self.x**2 + self.cell_xr**2))
+            self.next_cell_index = self.cell_index + 1
+
+        return l_edge
+
+    def update_position_direction(self, l):
+
+        x = np.sqrt(self.x**2 + l**2 + 2 * l * self.x * self.mu)
+        mu = (l + self.x * self.mu) / x
+
+        return x, mu
+
+    def calculate_mean_mu(self, xi, xf, l):
+
+        return (xf - xi) / l
+
+    def change_cell(self):
+
+        x, mu = self.update_position_direction(self.l_edge)
+        mu_mean = self.calculate_mean_mu(self.x, x, self.l_edge)
+        self.update_estimators(self.l_edge, mu_mean)
+
+        if self.next_cell_index == self.grid.Ncells:
+            # packet escapes
+            self.is_escaped = True
+            self.is_active = False
+            self.mu = mu
+            self.x = self.cell_xr
+
+        elif self.next_cell_index == -1:
+
+            raise GeometryException("No inner boundary in homogeneous sphere")
+
+        else:
+            # packet is transported into target cell
+
+            self.mu = mu
+
+            if self.next_cell_index > self.cell_index:
+                # packet is moved one cell to the right
+
+                self.x = self.grid.xl[self.next_cell_index]
+
+            else:
+                # packet is moved one cell to the left
+
+                self.x = self.grid.xr[self.next_cell_index]
+
+            # reset cell-based properties for easy access
+            self.cell_index = self.next_cell_index
+            self.cell_chi = self.grid.chi[self.cell_index]
+            self.cell_xl = self.grid.xl[self.cell_index]
+            self.cell_xr = self.grid.xr[self.cell_index]
+            self.cell_dx = self.grid.dx[self.cell_index]
+            self.cell_dV = self.grid.dV[self.cell_index]
 
             # recalculate distances
             self.calculate_and_set_propagation_distances()
@@ -507,8 +516,7 @@ class mcrt_grid_base(object):
             z = np.random.rand(1)[0]
             i = np.argwhere((self.npackets_cell_cum_frac - z) > 0)[0, 0]
             packet = self.init_packet(i)
-            ret = packet.propagate()
-            assert(ret)
+            packet.propagate()
             if packet.is_escaped:
                 self.esc_packets_x.append(packet.x)
                 self.esc_packets_mu.append(packet.mu)
