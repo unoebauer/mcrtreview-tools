@@ -4,4 +4,4 @@ This repository provides a number of Python programs, other tools and configurat
 
 ----
 
-_Detailed bibliographic information about the article with a link will be provided here_
+https://arxiv.org/abs/1907.09840
